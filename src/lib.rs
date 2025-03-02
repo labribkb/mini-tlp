@@ -1,3 +1,6 @@
+#[cfg(feature = "petgraph")]
+pub mod petgraph;
+
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::ops::RangeInclusive;
@@ -34,15 +37,68 @@ pub struct IdsRange(RangeInclusive<usize>);
 pub struct IdsList(Vec<usize>);
 
 
+impl IdsRange {
+    pub fn iter(&self) -> impl Iterator<Item=usize> {
+        self.0.clone().into_iter()
+    }
+}
+
+impl IdsList {
+    pub fn iter(&self) -> impl Iterator<Item=usize> {
+        self.0.iter().cloned()
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum IdsBloc {
     Range(IdsRange),
     List(IdsList)
 }
 
+impl IdsBloc {
+    pub fn iter(&self) -> Box<dyn Iterator<Item=usize> +'_>  {
+        match self {
+            IdsBloc::Range(ids_range) => Box::new(ids_range.iter()),
+            IdsBloc::List(ids_list) => Box::new(ids_list.iter()),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Ids(Vec<IdsBloc>);
 
+impl  Ids {
+
+    fn iter<'ids>(&'ids self) -> IdsIter<'ids>{
+        IdsIter {
+            full: Box::new(self.0.iter()),
+            current_bloc: None
+        }
+    }
+}
+
+struct IdsIter<'ids> {
+    full: Box<dyn Iterator<Item=&'ids IdsBloc> +'ids >,
+    current_bloc: Option<Box<dyn Iterator<Item=usize> +'ids>>
+}
+
+impl<'ids> Iterator for IdsIter<'ids> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if  self.current_bloc.is_none() {
+            let iter = self.full.next()
+                .map(|b| b.iter());
+            self.current_bloc = iter;
+        }
+
+        if let Some(bloc) = &mut self.current_bloc {
+            bloc.next()
+        } else {
+            None
+        }
+    }
+}
 
 
 impl IdsRange {
@@ -51,7 +107,7 @@ impl IdsRange {
     }
 
     pub fn to_vec(&self) -> Vec<usize> {
-        self.0.clone().collect()
+        self.iter().collect()
     }
 }
 
@@ -61,7 +117,7 @@ impl IdsList {
     }
 
     pub fn to_vec(&self) -> Vec<usize> {
-        self.0.clone()
+        self.iter().collect()
     }
 }
 
@@ -120,13 +176,21 @@ impl Deref for EdgesIds {
 
 #[derive(PartialEq, Debug)]
 pub struct Edge {
-    id: usize,
-    src: usize,
-    tgt: usize
+    pub id: usize,
+    pub src: usize,
+    pub tgt: usize
 }
+
 
 #[derive(PartialEq, Debug)]
 pub struct Edges(Vec<Edge>);
+
+impl Deref for Edges {
+    type Target = Vec<Edge>;
+    fn deref(&self) -> &Self::Target {
+        &self.0   
+    }
+}
 
 #[derive(PartialEq, Debug)]
 pub struct Date(String);
@@ -208,6 +272,16 @@ pub struct Graph {
     attributes: Option<Attributes>,
 
     clusters: Option<Clusters>,
+}
+
+impl Graph {
+    pub fn nodes_iter(&self) -> impl Iterator<Item=usize> {
+        self.nodes.iter()
+    }
+
+    pub fn edges_iter(&self) -> impl Iterator<Item=&Edge> {
+        self.edges.iter()
+    }
 }
 
 
