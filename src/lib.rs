@@ -233,7 +233,7 @@ Content: Debug
 
         let _ = (('(', space0, tag, space1).parse_next(input))?; 
         let res = (f.parse_next(input))?; 
-        let _ = ((space0, ')').parse_next(input))?;
+        let _ = ((space0, opt(')')).parse_next(input))?;
         Ok(res)
     }
 }
