@@ -1,10 +1,8 @@
-use std::ops::RangeBounds;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use winnow::ascii::alpha1;
 use winnow::ascii::dec_uint;
-use winnow::ascii::line_ending;
 use winnow::ascii::multispace0;
 use winnow::ascii::multispace1;
 use winnow::ascii::space0;
@@ -12,7 +10,6 @@ use winnow::ascii::space1;
 use winnow::ascii::take_escaped;
 use winnow::combinator::alt;
 use winnow::combinator::delimited;
-use winnow::combinator::not;
 use winnow::combinator::opt;
 use winnow::combinator::repeat;
 use winnow::combinator::separated;
@@ -23,9 +20,6 @@ use winnow::stream::AsChar;
 use winnow::stream::Compare;
 use winnow::stream::Stream;
 use winnow::stream::StreamIsPartial;
-use winnow::token::any;
-use winnow::token::none_of;
-use winnow::token::one_of;
 use winnow::token::take_until;
 use winnow::token::take_while;
 use winnow::Parser;
@@ -113,8 +107,8 @@ pub struct Graph {
     nodes: Nodes,
     edges: Edges,
 
-    properties: Properties,
-    attributes: Attributes
+    properties: Option<Properties>,
+    attributes: Option<Attributes>
 }
 
 
@@ -165,13 +159,13 @@ fn parse_ids_list(input: &mut &str) -> ModalResult<Vec<usize>> {
 
 fn nodes_range(input: &mut &str) -> ModalResult<NodesRange> {
     parse_tag("nodes", parse_range)
-        .map(|r| NodesRange(r))
+        .map(NodesRange)
         .parse_next(input)
 }
 
 fn nodes_list(input: &mut &str) -> ModalResult<NodesList> {
     parse_tag("nodes", parse_ids_list)
-        .map(|l| NodesList(l))
+        .map(NodesList)
         .parse_next(input)
 }
 
@@ -179,14 +173,13 @@ fn nodes_list(input: &mut &str) -> ModalResult<NodesList> {
 fn nodes(input: &mut &str) -> ModalResult<Nodes> {
     let nb_nodes: Option<usize> = opt(terminated(parse_tag("nb_nodes", dec_uint), multispace1)).parse_next(input)?;
 
-    dbg!(&nb_nodes);
     // TODO handle it to improve reading
 
     let _ = terminated(opt((';', take_until(.., '\n'))), multispace0).parse_next(input)?;
 
     alt((
-        nodes_range.map(|n| Nodes::Range(n)),
-        nodes_list.map(|l| Nodes::List(l))
+        nodes_range.map(Nodes::Range),
+        nodes_list.map(Nodes::List)
     ))
     .parse_next(input)
 }
@@ -206,19 +199,19 @@ fn parse_string(input: &mut &str) -> ModalResult<String> {
 
 fn date(input: &mut &str) -> ModalResult<Date> {
     parse_tag("date", parse_string)
-        .map(|s| Date(s))
+        .map(Date)
         .parse_next(input)
 }
 
 fn comments(input: &mut &str) -> ModalResult<Comments> {
     parse_tag("comments", parse_string)
-        .map(|s| Comments(s))
+        .map(Comments)
         .parse_next(input)
 }
 
 fn author(input: &mut &str) -> ModalResult<Author> {
     parse_tag("author", parse_string)
-        .map(|s| Author(s))
+        .map(Author)
         .parse_next(input)
 }
 
@@ -253,7 +246,6 @@ fn edges(input: &mut &str) -> ModalResult<Edges> {
     let count = opt(delimited(multispace0, nb_edges, multispace0))
         .parse_next(input)?;
 
-    dbg!(count);
     let _ = terminated(opt((';', take_until(.., '\n'))), multispace0).parse_next(input)?;
 
 
@@ -309,13 +301,11 @@ fn property(input: &mut &str) -> ModalResult<Property> {
         let graph_id: usize = delimited(multispace0, dec_uint, multispace1).parse_next(input)?;
         let r#type = terminated(property_type, multispace1).parse_next(input)?;
         let name = terminated(parse_string, multispace1).parse_next(input)?;
-        dbg!(&input);
 
         let default = terminated(property_default, multispace1).parse_next(input)?;
 
-        dbg!(&input);
-        let nodes_property: Option<Vec<NodeProperty>> = dbg!(opt(terminated(repeat(.., terminated(property_for_node, multispace0)), multispace0))
-            .parse_next(input))?;
+        let nodes_property: Option<Vec<NodeProperty>> = opt(terminated(repeat(.., terminated(property_for_node, multispace0)), multispace0))
+            .parse_next(input)?;
         Ok(Property { graph_id, name, r#type, node_default: default.0, edge_default: default.1, nodes_property: nodes_property.unwrap_or_default() })
     }
 
@@ -324,7 +314,7 @@ fn property(input: &mut &str) -> ModalResult<Property> {
 
 fn properties(input: &mut &str) -> ModalResult<Properties> {
     repeat(.., terminated(property, multispace0))
-        .map(|prop| Properties(prop))
+        .map(Properties)
         .parse_next(input)
 }
 
@@ -347,7 +337,7 @@ fn attributes(input: &mut &str) -> ModalResult<Attributes> {
         let graph_id: usize = delimited(multispace0, dec_uint, multispace1).parse_next(input)?;
     
         repeat(.., terminated(attribute, multispace0))
-            .map(|attr| Attributes(attr))
+            .map(Attributes)
             .parse_next(input)    
     }
 
@@ -360,20 +350,19 @@ fn attributes(input: &mut &str) -> ModalResult<Attributes> {
 fn graph(input: &mut &str) -> ModalResult<Graph> {
 
     fn inner_graph(input: &mut &str) -> ModalResult<Graph> {
-        dbg!(&input);
-        let version = dbg!(terminated(parse_string, multispace0).parse_next(input))?;
+        let version = terminated(parse_string, multispace0).parse_next(input)?;
         
         // TODO handle random ordering
-        let date = dbg!(opt(terminated(date, multispace0)).parse_next(input))?;
-        let comments = dbg!(opt(terminated(comments, multispace0)).parse_next(input))?;
+        let date = (opt(terminated(date, multispace0)).parse_next(input))?;
+        let comments = (opt(terminated(comments, multispace0)).parse_next(input))?;
 
-        let nodes = dbg!(terminated(nodes, multispace0).parse_next(input))?;
-        let edges = dbg!(terminated(edges, multispace0).parse_next(input))?;
+        let nodes = (terminated(nodes, multispace0).parse_next(input))?;
+        let edges = (terminated(edges, multispace0).parse_next(input))?;
 
         // TODO check the edges are valid in comparison to nodes
 
-        let properties = dbg!(terminated(properties, multispace0).parse_next(input))?;
-        let attributes = dbg!(terminated(attributes, multispace0).parse_next(input))?;
+        let properties = opt(terminated(properties, multispace0)).parse_next(input)?;
+        let attributes = opt(terminated(attributes, multispace0)).parse_next(input)?;
         
         Ok(Graph{
             version,
@@ -394,7 +383,7 @@ fn graph(input: &mut &str) -> ModalResult<Graph> {
 
 #[cfg(test)]
 mod test {
-    use crate::{edge, graph, nodes_list, nodes_range, parse_range, parse_string, property, property_default, property_for_node, property_type, Edge, NodesList, NodesRange};
+    use crate::{edge, graph, nodes_list, nodes_range, parse_string, property, property_default, property_for_node, property_type, Edge, NodesList, NodesRange};
 
     #[test]
     fn test_nodes_list() {
@@ -426,9 +415,7 @@ mod test {
 
 ];
         for repr in reprs.iter() {
-            dbg!(&repr);
             let prop = property(&mut repr.clone()).unwrap();
-            dbg!("ok");
         }
     }
 
@@ -478,7 +465,7 @@ mod test {
         ];
 
         for repr in &mut reprs {
-            let t = property_default(dbg!(repr)).unwrap();
+            let t = property_default(repr).unwrap();
         }
     }
 
@@ -488,7 +475,7 @@ mod test {
         let nodes: NodesRange = nodes_range(&mut repr).unwrap();
         assert_eq!(
             nodes,
-            NodesRange((0..=5))
+            NodesRange(0..=5)
         );
     }
 

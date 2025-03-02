@@ -5,3 +5,8 @@ edition = "2024"
 
 [dependencies]
 winnow = "0.7.3"
+petgraph = {version="0.7.1", optional = true}
+
+[features]
+default = ["petgraph"]
+petgraph = ["dep:petgraph"]
